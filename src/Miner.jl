@@ -17,10 +17,10 @@ include("block_manager.jl")
 
 export start_game
 
-function start_game()
+function start_game(; scenekw...)
     @info "Starting Game!"
     Makie.set_theme!(; ssao=true)
-    scene = Scene(; backgroundcolor=:lightblue)
+    scene = Scene(; backgroundcolor=:lightblue, scenekw...)
     pc = PlayerController(scene)
 
     subscene = Scene(scene)
@@ -34,7 +34,7 @@ function start_game()
         mid .+ Point2f(0, gap), mid .+ Point2f(0, gap + line),
         mid .- Point2f(0, gap), mid .- Point2f(0, gap + line),
     ]
-    linesegments!(subscene, crosshair; color=(:red, 0.5), inspectable=false, linewidth=2, space=:relative)
+    # linesegments!(subscene, crosshair; color=(:red, 0.5), inspectable=false, linewidth=2, space=:relative)
 
     world_changelocs = []
     world_changeblocks = []
@@ -42,8 +42,17 @@ function start_game()
     c = cameracontrols(scene)
     c.eyeposition[] = (5, surface_height(0, 0) + 3, 5)
     c.lookat[] = Vec3f(6, surface_height(0, 0) + 3, 6)
-    c.upvector[] = (1, 1, 1)
-    update_cam!(scene)
+    c.upvector[] = (0, 1, 0)
+    update_cam!(scene, pc)
+    screen = display(scene; backend=GLMakie)
+    last_time = time()
+    @async while isopen(screen)
+        timestep = time() - last_time
+        last_time = time()
+        hasmoved = move_cam!(scene, pc, timestep)
+        hasmoved && update_cam!(scene, pc)
+        sleep(1/30)
+    end
 
     currBlock = Observable(BlockType(2))
     text!(subscene, Point(10, 10), text="Block In-Hand:")
@@ -68,13 +77,13 @@ function start_game()
     for (idx, i) in enumerate(positionsAll)
         marker = return_mesh(BlockType(idx))
         if (idx == 1)
-            a = meshscatter!(scene, i; markersize=1, marker=marker, color=(:grey, 0))
+        #     a = meshscatter!(scene, i; markersize=1, marker=marker, color=(:grey, 0))
         elseif (idx == 9)
             a = meshscatter!(scene, i; markersize=1, marker=marker, color=(:white, 0.8))
-        elseif (idx in collect(10:16))
-            i[] = repeat(i[] .- Point3f0(-0.5, -0.5, -0.5), 2)
-            uv = scatter_cases[idx]
-            up = qrotation(Vec3f(0, 1, 0), 0.5pi)
+        # elseif (idx in collect(10:16))
+        #     i[] = repeat(i[] .- Point3f0(-0.5, -0.5, -0.5), 2)
+        #     uv = scatter_cases[idx]
+        #     up = qrotation(Vec3f(0, 1, 0), 0.5pi)
         else
             a = meshscatter!(scene, i; markersize=1, marker=marker, color=tex)
         end
@@ -127,67 +136,67 @@ function start_game()
         end
     end
 
-    screen = GLMakie.Screen(scene; focus_on_show=true, float=true, ssao=true, start_renderloop=false)
-    glscreen = screen.glscreen
+    # screen = GLMakie.Screen(scene; focus_on_show=true, float=true, ssao=true, start_renderloop=false)
+    # glscreen = screen.glscreen
 
-    on(events(scene).keyboardbutton) do button
-        if button.key == Makie.Keyboard.escape
-            GLFW.make_windowed!(glscreen)
-            GLFW.SetInputMode(glscreen, GLFW.CURSOR, GLFW.CURSOR_NORMAL)
-            GLFW.SetWindowAttrib(glscreen, GLFW.DECORATED, true)
-            return
-        end
-        if (button.key == Makie.Keyboard._1 && button.action == Makie.Keyboard.press)
-            if (Int(currBlock[]) > 2)
-                currBlock[] = BlockType(Int(currBlock[]) - 1)
-                txt[] = string(currBlock[])
-            end
-        elseif (button.key == Makie.Keyboard._2 && button.action == Makie.Keyboard.press)
-            if (Int(currBlock[]) < 8)
-                currBlock[] = BlockType(Int(currBlock[]) + 1)
-                txt[] = string(currBlock[])
-            end
-        end
-    end
+    # on(events(scene).keyboardbutton) do button
+    #     if button.key == Makie.Keyboard.escape
+    #         GLFW.make_windowed!(glscreen)
+    #         GLFW.SetInputMode(glscreen, GLFW.CURSOR, GLFW.CURSOR_NORMAL)
+    #         GLFW.SetWindowAttrib(glscreen, GLFW.DECORATED, true)
+    #         return
+    #     end
+    #     if (button.key == Makie.Keyboard._1 && button.action == Makie.Keyboard.press)
+    #         if (Int(currBlock[]) > 2)
+    #             currBlock[] = BlockType(Int(currBlock[]) - 1)
+    #             txt[] = string(currBlock[])
+    #         end
+    #     elseif (button.key == Makie.Keyboard._2 && button.action == Makie.Keyboard.press)
+    #         if (Int(currBlock[]) < 8)
+    #             currBlock[] = BlockType(Int(currBlock[]) + 1)
+    #             txt[] = string(currBlock[])
+    #         end
+    #     end
+    # end
 
-    GLFW.SetInputMode(glscreen, GLFW.CURSOR, GLFW.CURSOR_DISABLED)
+    # GLFW.SetInputMode(glscreen, GLFW.CURSOR, GLFW.CURSOR_DISABLED)
 
-    # GLFW.SetKeyCallback(glscreen, esc_callback)
-    GLFW.make_fullscreen!(glscreen)
-    cam_controls = cameracontrols(scene)
-    last_time = time()
-    task = @async begin
-        while isopen(screen)
-            try
-                GLMakie.pollevents(screen)
-                yield()
-                timestep = time() - last_time
-                last_time = time()
-                move_cam!(scene, pc, timestep)
-                update_cam!(scene, pc)
-                time_per_frame = 1.0 / 30
-                t = time_ns()
-                GLMakie.render_frame(screen)
-                GLFW.SwapBuffers(glscreen)
-                t_elapsed = (time_ns() - t) / 1e9
-                diff = time_per_frame - t_elapsed
-                if diff > 0.001 # can't sleep less than 0.001
-                    sleep(diff)
-                else # if we don't sleep, we still need to yield explicitely to other tasks
-                    yield()
-                end
-                framerate[] = string(round(Int, 1 / t_elapsed), " fps")
-                camloc[] = string("Current Loc:", round.(Int, cam_controls.eyeposition[]))
-            catch e
-                @warn "Error in renderloop" exception=(e, catch_backtrace())
-                close(screen)
-            end
-        end
-        close(screen)
-    end
-    Base.errormonitor(task)
+    # # GLFW.SetKeyCallback(glscreen, esc_callback)
+    # GLFW.make_fullscreen!(glscreen)
+    # cam_controls = cameracontrols(scene)
+    # last_time = time()
+    # task = @async begin
+    #     while isopen(screen)
+    #         try
+    #             GLMakie.pollevents(screen)
+    #             yield()
+    #             timestep = time() - last_time
+    #             last_time = time()
+    #             move_cam!(scene, pc, timestep)
+    #             update_cam!(scene, pc)
+    #             time_per_frame = 1.0 / 30
+    #             t = time_ns()
+    #             GLMakie.render_frame(screen)
+    #             GLFW.SwapBuffers(glscreen)
+    #             t_elapsed = (time_ns() - t) / 1e9
+    #             diff = time_per_frame - t_elapsed
+    #             if diff > 0.001 # can't sleep less than 0.001
+    #                 sleep(diff)
+    #             else # if we don't sleep, we still need to yield explicitely to other tasks
+    #                 yield()
+    #             end
+    #             framerate[] = string(round(Int, 1 / t_elapsed), " fps")
+    #             camloc[] = string("Current Loc:", round.(Int, cam_controls.eyeposition[]))
+    #         catch e
+    #             @warn "Error in renderloop" exception=(e, catch_backtrace())
+    #             close(screen)
+    #         end
+    #     end
+    #     close(screen)
+    # end
+    # Base.errormonitor(task)
 
-    return screen
+    return scene, screen
 end
 
 end # module Miner

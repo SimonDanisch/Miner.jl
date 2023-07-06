@@ -100,7 +100,9 @@ function move_cam!(scene, cam::PlayerController, timestep)
             viewnorm * (backward - forward)
         )
         _translate_cam!(scene, cam, translation)
+        return true
     end
+    return false
 end
 
 
